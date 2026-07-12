@@ -1,0 +1,18 @@
+[package]
+name = "agent_usage"
+version = "0.1.0"
+edition = "2024"
+description = "Print local coding-agent subscription usage (Claude Code, Codex) in the terminal"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "2", features = ["json"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+strip = true
+lto = true
