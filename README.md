@@ -10,6 +10,7 @@ session transcripts for **today's per-session / per-model usage**:
 |---|---|
 | Claude (session/weekly limits) | `~/.claude/.credentials.json` → `api.anthropic.com/api/oauth/usage` |
 | Codex (session/weekly limits) | `~/.codex/auth.json` → `chatgpt.com/backend-api/codex/usage` |
+| Cursor (included-usage limits) | `~/.config/cursor/auth.json` → `api2.cursor.sh` DashboardService |
 | OpenRouter (credits & spend) | key from pi/opencode → `openrouter.ai/api/v1/{credits,key}` |
 | Top sessions / by-model tables | local transcripts of Claude Code, Codex, pi, oh-my-pi (omp), opencode |
 
@@ -45,6 +46,7 @@ make install PREFIX=/usr/local   # or elsewhere (BINDIR = PREFIX/bin)
 ./usage --json         # normalized JSON for scripts / monitoring
 ./usage --claude       # only Claude (limits + sessions)
 ./usage --codex        # only Codex (limits + sessions)
+./usage --cursor       # only Cursor (included-usage limits)
 ./usage --openrouter   # only OpenRouter (credits + pi/omp/opencode sessions)
 ./usage --no-sessions  # skip the local transcript scan
 AGENT_USAGE_DATE=2026-07-08 ./usage   # session tables for a past day
@@ -63,6 +65,9 @@ Codex (prolite)
   Weekly (all models)           ███████████░░░░░░░░░  53%  resets Fri 17 Jul 23:09 (in 5d 13h)
   5h (GPT-5.3-Codex-Spark)      ░░░░░░░░░░░░░░░░░░░░   0%  resets 14:48 (in 4h 59m)
   Weekly (GPT-5.3-Codex-Spark)  ░░░░░░░░░░░░░░░░░░░░   0%  resets Sun 19 Jul 09:48 (in 6d 23h)
+
+Cursor (Pro)
+  Included usage (month)  ██░░░░░░░░░░░░░░░░░░  10%  $2.00 of $20.00  resets Sat 18 Jul 09:42 (in 4d 21h)
 
 OpenRouter (pay-as-you-go)
   Credits  ████░░░░░░░░░░░░░░░░  21%  $5.18 of $25.00

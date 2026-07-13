@@ -16,6 +16,7 @@ provider that issued them.
 |---|---|---|
 | Claude Code | `~/.claude/.credentials.json` → `claudeAiOauth.accessToken` | `GET https://api.anthropic.com/api/oauth/usage` with `anthropic-beta: oauth-2025-04-20` |
 | Codex | `~/.codex/auth.json` → `tokens.access_token`, `tokens.account_id` | `GET https://chatgpt.com/backend-api/codex/usage` with `chatgpt-account-id` header |
+| Cursor | `~/.config/cursor/auth.json` → `accessToken` (JWT written by `cursor-agent login`) | `POST https://api2.cursor.sh/aiserver.v1.DashboardService/{GetCurrentPeriodUsage,GetPlanInfo}` (ConnectRPC over JSON, `connect-protocol-version: 1`) |
 | OpenRouter | first key found in `~/.pi/agent/auth.json` or `~/.local/share/opencode/auth.json` (`openrouter.key`) | `GET https://openrouter.ai/api/v1/credits` and `/api/v1/key` |
 
 These are the same endpoints the agents' own `/usage` and `/status` screens
@@ -30,6 +31,11 @@ runs on its own thread while the main thread does the session scan.
   (weekly) as `used_percent` + `reset_at`, plus `additional_rate_limits` for
   model-scoped meters (e.g. GPT-5.3-Codex-Spark). Window labels are derived
   from `limit_window_seconds` (18000 → "5h", 604800 → "Weekly").
+- **Cursor** meters a monthly included-usage allowance in cents
+  (`planUsage.limit` / `remaining`, e.g. $20/mo on Pro) rather than token
+  windows; we show `totalPercentUsed` with the dollar figures and the billing
+  cycle end as the reset. Separate auto-model / named-API-model rows appear
+  once those meters are non-zero. Timestamps arrive as millisecond strings.
 - **OpenRouter** has no rate windows; we show credits consumed
   (`total_usage / total_credits`), the key spend limit if one is set, and
   daily/weekly/monthly spend.
@@ -94,6 +100,9 @@ the providers' actual (undisclosed) limit accounting.
 
 ## Caveats
 
+- Cursor has no rows in the session tables: `cursor-agent` chat DBs
+  (`~/.cursor/chats/*/*/store.db`) store messages but no token counts —
+  Cursor accounts usage server-side only.
 - opencode can also authenticate to OpenAI via ChatGPT OAuth; that traffic
   draws from the same Codex subscription limits shown in the Codex block, but
   its sessions are tagged `opencode`, not `codex`.

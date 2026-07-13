@@ -1,5 +1,6 @@
 mod claude;
 mod codex;
+mod cursor;
 mod model;
 mod openrouter;
 mod render;
@@ -27,6 +28,7 @@ OPTIONS:
     --json         emit normalized JSON instead of the terminal view
     --claude       only Claude (limits + sessions)
     --codex        only Codex (limits + sessions)
+    --cursor       only Cursor (included-usage limits)
     --openrouter   only OpenRouter (credits + pi/omp/opencode sessions)
     --no-sessions  skip the local top-sessions / by-model scan
     -h, --help     show this help
@@ -50,6 +52,7 @@ fn main() {
             "--json" => json = true,
             "--claude" => only = Some("claude"),
             "--codex" => only = Some("codex"),
+            "--cursor" => only = Some("cursor"),
             "--openrouter" => only = Some("openrouter"),
             "--no-sessions" => scan_sessions = false,
             "-h" | "--help" => {
@@ -84,6 +87,11 @@ fn main() {
             "codex",
             codex::fetch as Fetcher,
             detected(format!("{home}/.codex/auth.json")),
+        ),
+        (
+            "cursor",
+            cursor::fetch as Fetcher,
+            detected(format!("{home}/.config/cursor/auth.json")),
         ),
         (
             "openrouter",

@@ -9,6 +9,7 @@ pub fn print_provider(usage: &ProviderUsage, color: bool) {
     let title = match usage.provider {
         "claude" => "Claude",
         "codex" => "Codex",
+        "cursor" => "Cursor",
         "openrouter" => "OpenRouter",
         other => other,
     };
