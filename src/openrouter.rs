@@ -43,8 +43,12 @@ pub fn find_key(home: &str) -> Option<String> {
         ),
     ];
     for (path, pointer) in candidates {
-        let Ok(raw) = std::fs::read_to_string(&path) else { continue };
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else { continue };
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
         let mut cur = &value;
         for p in pointer {
             let Some(next) = cur.get(p) else { break };

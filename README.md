@@ -14,9 +14,20 @@ session transcripts for **today's per-session / per-model usage**:
 | Top sessions / by-model tables | local transcripts of Claude Code, Codex, pi, oh-my-pi (omp), opencode |
 
 Providers whose credentials aren't present are skipped silently. Nothing is
-stored or sent anywhere else; the tool is read-only. See
+stored or sent anywhere else; the tool is read-only and each credential is
+only ever sent to the provider that issued it. See
 [docs/how-it-works.md](docs/how-it-works.md) for the full data-source and
 metric documentation.
+
+> **Disclaimer**: this project is not affiliated with Anthropic, OpenAI, or
+> OpenRouter. The Claude and Codex usage endpoints are undocumented internal
+> APIs used by the agents' own status screens — they may change or disappear
+> without notice, and your use of them is subject to each provider's terms of
+> service. Transcript formats are similarly unstable; parsers degrade to
+> zeros rather than erroring when fields go missing.
+
+**Platform support**: Linux and macOS. Windows is untested and unsupported
+(agent config paths and `HOME` resolution differ).
 
 ## Build
 
@@ -131,3 +142,8 @@ the tool tells you to open the corresponding agent once to refresh it.
   ]
 }
 ```
+
+## License
+
+Licensed under either of [Apache License 2.0](LICENSE-APACHE) or
+[MIT License](LICENSE-MIT) at your option.

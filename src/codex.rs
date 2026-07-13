@@ -47,8 +47,7 @@ pub fn fetch(home: &str) -> Result<ProviderUsage, String> {
     let path = format!("{home}/.codex/auth.json");
     let raw = std::fs::read_to_string(&path)
         .map_err(|e| format!("no Codex credentials at {path} ({e})"))?;
-    let auth: Auth =
-        serde_json::from_str(&raw).map_err(|e| format!("cannot parse {path}: {e}"))?;
+    let auth: Auth = serde_json::from_str(&raw).map_err(|e| format!("cannot parse {path}: {e}"))?;
     let tokens = auth
         .tokens
         .ok_or_else(|| format!("{path} has no ChatGPT tokens — is Codex logged in?"))?;
@@ -91,7 +90,10 @@ pub fn fetch(home: &str) -> Result<ProviderUsage, String> {
 }
 
 fn push_windows(windows: &mut Vec<Window>, rl: &RateLimit, scope: Option<&str>) {
-    for win in [&rl.primary_window, &rl.secondary_window].into_iter().flatten() {
+    for win in [&rl.primary_window, &rl.secondary_window]
+        .into_iter()
+        .flatten()
+    {
         let span = humanize_window(win.limit_window_seconds);
         let label = match scope {
             Some(name) => format!("{span} ({name})"),

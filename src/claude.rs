@@ -68,12 +68,16 @@ pub fn fetch(home: &str) -> Result<ProviderUsage, String> {
         serde_json::from_str(&raw).map_err(|e| format!("cannot parse {path}: {e}"))?;
 
     if let Some(exp) = creds.oauth.expires_at
-        && exp < Utc::now().timestamp_millis() {
-            return Err("Claude OAuth token expired — open `claude` once to refresh it".into());
-        }
+        && exp < Utc::now().timestamp_millis()
+    {
+        return Err("Claude OAuth token expired — open `claude` once to refresh it".into());
+    }
 
     let resp = ureq::get(USAGE_URL)
-        .set("Authorization", &format!("Bearer {}", creds.oauth.access_token))
+        .set(
+            "Authorization",
+            &format!("Bearer {}", creds.oauth.access_token),
+        )
         .set("anthropic-beta", "oauth-2025-04-20")
         .call()
         .map_err(|e| match e {
@@ -131,13 +135,14 @@ pub fn fetch(home: &str) -> Result<ProviderUsage, String> {
     }
 
     if let Some(extra) = &usage.extra_usage
-        && extra.is_enabled == Some(true) {
-            windows.push(Window::new(
-                "Extra usage credits",
-                extra.utilization.unwrap_or(0.0),
-                None,
-            ));
-        }
+        && extra.is_enabled == Some(true)
+    {
+        windows.push(Window::new(
+            "Extra usage credits",
+            extra.utilization.unwrap_or(0.0),
+            None,
+        ));
+    }
 
     Ok(ProviderUsage {
         provider: "claude",

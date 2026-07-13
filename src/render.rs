@@ -112,7 +112,11 @@ impl Table {
                     Align::Left => format!(" {cell:<w$} "),
                     Align::Right => format!(" {cell:>w$} "),
                 };
-                out.push_str(&if bold { paint(&padded, "1", color) } else { padded });
+                out.push_str(&if bold {
+                    paint(&padded, "1", color)
+                } else {
+                    padded
+                });
                 out.push_str(&sep);
             }
             println!("{out}");
@@ -137,7 +141,9 @@ pub fn print_sessions(sessions: &[SessionStat], models: &[ModelStat], color: boo
     println!();
     println!("{}", paint("Top sessions today", "1", color));
     let mut table = Table {
-        headers: vec!["#", "agent", "project", "model", "reqs", "in", "out", "cache-r", "cache-w"],
+        headers: vec![
+            "#", "agent", "project", "model", "reqs", "in", "out", "cache-r", "cache-w",
+        ],
         aligns: vec![
             Align::Right,
             Align::Left,

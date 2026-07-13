@@ -162,20 +162,26 @@ fn scan_claude_file(path: &Path, today: NaiveDate) -> Option<SessionStat> {
 
     for line in read_lines(path)? {
         if cwd.is_none()
-            && let Some(c) = line.get("cwd").and_then(Value::as_str) {
-                cwd = Some(c.to_string());
-            }
-        let Some(message) = line.get("message") else { continue };
-        let Some(usage) = message.get("usage") else { continue };
+            && let Some(c) = line.get("cwd").and_then(Value::as_str)
+        {
+            cwd = Some(c.to_string());
+        }
+        let Some(message) = line.get("message") else {
+            continue;
+        };
+        let Some(usage) = message.get("usage") else {
+            continue;
+        };
         if !is_today(&line, today) {
             continue;
         }
         // Streaming rewrites the same message on multiple lines; count each
         // API response once.
         if let Some(id) = message.get("id").and_then(Value::as_str)
-            && !seen_ids.insert(id.to_string()) {
-                continue;
-            }
+            && !seen_ids.insert(id.to_string())
+        {
+            continue;
+        }
         let model = message
             .get("model")
             .and_then(Value::as_str)
@@ -199,7 +205,9 @@ fn scan_claude_file(path: &Path, today: NaiveDate) -> Option<SessionStat> {
         .as_deref()
         .map(last_path_component)
         .unwrap_or_else(|| "unknown".to_string());
-    Some(finish_session("claude", project, session_id, requests, by_model))
+    Some(finish_session(
+        "claude", project, session_id, requests, by_model,
+    ))
 }
 
 fn scan_codex(home: &str, today: NaiveDate) -> Vec<SessionStat> {
@@ -212,9 +220,10 @@ fn scan_codex(home: &str, today: NaiveDate) -> Vec<SessionStat> {
                 stack.push(path);
             } else if path.extension().is_some_and(|e| e == "jsonl")
                 && modified_today(&path, today)
-                && let Some(stat) = scan_codex_file(&path, today) {
-                    out.push(stat);
-                }
+                && let Some(stat) = scan_codex_file(&path, today)
+            {
+                out.push(stat);
+            }
         }
     }
     out
@@ -228,7 +237,9 @@ fn scan_codex_file(path: &Path, today: NaiveDate) -> Option<SessionStat> {
     let mut requests = 0u64;
 
     for line in read_lines(path)? {
-        let Some(payload) = line.get("payload") else { continue };
+        let Some(payload) = line.get("payload") else {
+            continue;
+        };
         match line.get("type").and_then(Value::as_str) {
             Some("session_meta") => {
                 session_id = payload
@@ -244,20 +255,18 @@ fn scan_codex_file(path: &Path, today: NaiveDate) -> Option<SessionStat> {
                     model = m.to_string();
                 }
                 if cwd.is_none()
-                    && let Some(c) = payload.get("cwd").and_then(Value::as_str) {
-                        cwd = Some(c.to_string());
-                    }
+                    && let Some(c) = payload.get("cwd").and_then(Value::as_str)
+                {
+                    cwd = Some(c.to_string());
+                }
             }
-            Some("event_msg") if payload.get("type").and_then(Value::as_str)
-                == Some("token_count") =>
+            Some("event_msg")
+                if payload.get("type").and_then(Value::as_str) == Some("token_count") =>
             {
                 // Sum per-request deltas (`last_token_usage`) instead of the
                 // cumulative total so a session spanning midnight only counts
                 // today's part.
-                let Some(last) = payload
-                    .get("info")
-                    .and_then(|i| i.get("last_token_usage"))
-                else {
+                let Some(last) = payload.get("info").and_then(|i| i.get("last_token_usage")) else {
                     continue;
                 };
                 if !is_today(&line, today) {
@@ -278,13 +287,19 @@ fn scan_codex_file(path: &Path, today: NaiveDate) -> Option<SessionStat> {
         }
     }
 
-    let session_id =
-        session_id.unwrap_or_else(|| path.file_stem().unwrap_or_default().to_string_lossy().to_string());
+    let session_id = session_id.unwrap_or_else(|| {
+        path.file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
     let project = cwd
         .as_deref()
         .map(last_path_component)
         .unwrap_or_else(|| "unknown".to_string());
-    Some(finish_session("codex", project, session_id, requests, by_model))
+    Some(finish_session(
+        "codex", project, session_id, requests, by_model,
+    ))
 }
 
 /// pi and oh-my-pi (omp) share the same session format: a `session` header
@@ -318,11 +333,15 @@ fn scan_pi_file(path: &Path, provider: &'static str, today: NaiveDate) -> Option
                 cwd = line.get("cwd").and_then(Value::as_str).map(str::to_string);
             }
             Some("message") => {
-                let Some(message) = line.get("message") else { continue };
+                let Some(message) = line.get("message") else {
+                    continue;
+                };
                 if message.get("role").and_then(Value::as_str) != Some("assistant") {
                     continue;
                 }
-                let Some(usage) = message.get("usage") else { continue };
+                let Some(usage) = message.get("usage") else {
+                    continue;
+                };
                 if !is_today(&line, today) {
                     continue;
                 }
@@ -349,13 +368,19 @@ fn scan_pi_file(path: &Path, provider: &'static str, today: NaiveDate) -> Option
         }
     }
 
-    let session_id = session_id
-        .unwrap_or_else(|| path.file_stem().unwrap_or_default().to_string_lossy().to_string());
+    let session_id = session_id.unwrap_or_else(|| {
+        path.file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
     let project = cwd
         .as_deref()
         .map(last_path_component)
         .unwrap_or_else(|| "unknown".to_string());
-    Some(finish_session(provider, project, session_id, requests, by_model))
+    Some(finish_session(
+        provider, project, session_id, requests, by_model,
+    ))
 }
 
 /// opencode stores one JSON file per message under
@@ -377,8 +402,12 @@ fn scan_opencode(home: &str, today: NaiveDate) -> Vec<SessionStat> {
             if file.extension().is_none_or(|e| e != "json") || !modified_today(&file, today) {
                 continue;
             }
-            let Ok(raw) = std::fs::read_to_string(&file) else { continue };
-            let Ok(msg) = serde_json::from_str::<Value>(&raw) else { continue };
+            let Ok(raw) = std::fs::read_to_string(&file) else {
+                continue;
+            };
+            let Ok(msg) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
             if msg.get("role").and_then(Value::as_str) != Some("assistant") {
                 continue;
             }
@@ -429,7 +458,9 @@ fn scan_opencode(home: &str, today: NaiveDate) -> Vec<SessionStat> {
             .as_deref()
             .map(last_path_component)
             .unwrap_or_else(|| "unknown".to_string());
-        out.push(finish_session("opencode", project, session_id, requests, by_model));
+        out.push(finish_session(
+            "opencode", project, session_id, requests, by_model,
+        ));
     }
     out
 }
@@ -465,4 +496,139 @@ fn read_dir_paths(dir: &Path) -> Vec<PathBuf> {
     std::fs::read_dir(dir)
         .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use std::fs;
+
+    fn fixture_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join("agent_usage_tests").join(format!(
+            "{}-{}",
+            std::process::id(),
+            name
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn day() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 1, 15).unwrap()
+    }
+
+    #[test]
+    fn claude_dedups_streaming_lines_and_skips_synthetic() {
+        let dir = fixture_dir("claude");
+        let file = dir.join("aaaa-session.jsonl");
+        let assistant = r#"{"type":"assistant","timestamp":"2026-01-15T12:00:00Z","cwd":"/home/u/projx","message":{"id":"m1","role":"assistant","model":"claude-x","usage":{"input_tokens":10,"output_tokens":100,"cache_read_input_tokens":1000,"cache_creation_input_tokens":50}}}"#;
+        let synthetic = r#"{"type":"assistant","timestamp":"2026-01-15T12:01:00Z","message":{"id":"m2","model":"<synthetic>","usage":{"input_tokens":9999,"output_tokens":9999}}}"#;
+        let other_day = r#"{"type":"assistant","timestamp":"2026-01-10T12:00:00Z","message":{"id":"m3","model":"claude-x","usage":{"input_tokens":7,"output_tokens":7}}}"#;
+        // the same message id appears twice (streaming rewrite) — count once
+        fs::write(
+            &file,
+            [assistant, assistant, synthetic, other_day].join("\n"),
+        )
+        .unwrap();
+
+        let stat = scan_claude_file(&file, day()).unwrap();
+        assert_eq!(stat.requests, 1);
+        assert_eq!(stat.tokens.input, 10);
+        assert_eq!(stat.tokens.output, 100);
+        assert_eq!(stat.tokens.cache_read, 1000);
+        assert_eq!(stat.tokens.cache_write, 50);
+        assert_eq!(stat.project, "projx");
+        assert_eq!(stat.model, "claude-x");
+    }
+
+    #[test]
+    fn codex_sums_deltas_and_splits_cached_input() {
+        let dir = fixture_dir("codex");
+        let file = dir.join("rollout-x.jsonl");
+        let lines = [
+            r#"{"type":"session_meta","payload":{"id":"sess-1","cwd":"/home/u/projy"}}"#,
+            r#"{"type":"turn_context","payload":{"model":"gpt-x","cwd":"/home/u/projy"}}"#,
+            // input_tokens includes cached_input_tokens; scanner must split
+            r#"{"type":"event_msg","timestamp":"2026-01-15T12:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":20}}}}"#,
+            // rate-limit-only event with no usage info — ignored
+            r#"{"type":"event_msg","timestamp":"2026-01-15T12:01:00Z","payload":{"type":"token_count","info":null}}"#,
+            // different day — ignored
+            r#"{"type":"event_msg","timestamp":"2026-01-10T12:00:00Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":500,"cached_input_tokens":0,"output_tokens":500}}}}"#,
+        ];
+        fs::write(&file, lines.join("\n")).unwrap();
+
+        let stat = scan_codex_file(&file, day()).unwrap();
+        assert_eq!(stat.requests, 1);
+        assert_eq!(stat.tokens.input, 60);
+        assert_eq!(stat.tokens.cache_read, 40);
+        assert_eq!(stat.tokens.output, 20);
+        assert_eq!(stat.session_id, "sess-1");
+        assert_eq!(stat.project, "projy");
+        assert_eq!(stat.model, "gpt-x");
+    }
+
+    #[test]
+    fn pi_reads_assistant_usage_and_cost() {
+        let dir = fixture_dir("pi");
+        let file = dir.join("2026-01-15T12-00-00-000Z_abc.jsonl");
+        let lines = [
+            r#"{"type":"session","id":"pi-1","timestamp":"2026-01-15T11:59:00Z","cwd":"/home/u/projz"}"#,
+            r#"{"type":"message","timestamp":"2026-01-15T12:00:00Z","message":{"role":"user","content":"hi"}}"#,
+            r#"{"type":"message","timestamp":"2026-01-15T12:00:30Z","message":{"role":"assistant","model":"m/x","usage":{"input":5,"output":6,"cacheRead":7,"cacheWrite":8,"cost":{"total":0.5}}}}"#,
+        ];
+        fs::write(&file, lines.join("\n")).unwrap();
+
+        let stat = scan_pi_file(&file, "pi", day()).unwrap();
+        assert_eq!(stat.provider, "pi");
+        assert_eq!(stat.requests, 1);
+        assert_eq!(stat.tokens.input, 5);
+        assert_eq!(stat.tokens.output, 6);
+        assert_eq!(stat.tokens.cache_read, 7);
+        assert_eq!(stat.tokens.cache_write, 8);
+        assert!((stat.tokens.cost_usd - 0.5).abs() < 1e-9);
+        assert_eq!(stat.session_id, "pi-1");
+        assert_eq!(stat.project, "projz");
+    }
+
+    #[test]
+    fn opencode_bills_reasoning_as_output() {
+        // scan_opencode filters by real file mtime, so this test uses the
+        // actual current date rather than a fixed one.
+        let home = fixture_dir("opencode-home");
+        let ses = home.join(".local/share/opencode/storage/message/ses_1");
+        fs::create_dir_all(&ses).unwrap();
+        let now_ms = Utc::now().timestamp_millis();
+        let assistant = format!(
+            r#"{{"id":"msg1","sessionID":"ses_1","role":"assistant","time":{{"created":{now_ms}}},"modelID":"m-x","path":{{"cwd":"/home/u/projw"}},"cost":0.25,"tokens":{{"input":1,"output":2,"reasoning":3,"cache":{{"read":4,"write":5}}}}}}"#
+        );
+        fs::write(ses.join("msg1.json"), assistant).unwrap();
+        fs::write(ses.join("msg0.json"), r#"{"id":"msg0","role":"user"}"#).unwrap();
+
+        let stats = scan_opencode(home.to_str().unwrap(), Local::now().date_naive());
+        assert_eq!(stats.len(), 1);
+        let stat = &stats[0];
+        assert_eq!(stat.provider, "opencode");
+        assert_eq!(stat.requests, 1);
+        assert_eq!(stat.tokens.input, 1);
+        assert_eq!(stat.tokens.output, 5); // 2 output + 3 reasoning
+        assert_eq!(stat.tokens.cache_read, 4);
+        assert_eq!(stat.tokens.cache_write, 5);
+        assert!((stat.tokens.cost_usd - 0.25).abs() < 1e-9);
+        assert_eq!(stat.project, "projw");
+        assert_eq!(stat.session_id, "ses_1");
+    }
+
+    #[test]
+    fn score_ranks_output_heavy_sessions_above_cache_readers() {
+        let generator = Tokens {
+            output: 40_000,
+            ..Default::default()
+        };
+        let cache_reader = Tokens {
+            cache_read: 1_500_000,
+            ..Default::default()
+        };
+        assert!(generator.score() > cache_reader.score());
+    }
 }

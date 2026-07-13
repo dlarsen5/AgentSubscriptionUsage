@@ -131,8 +131,10 @@ fn main() {
     let any_ok = results.iter().any(|(_, r)| r.is_ok());
 
     if json {
-        let providers: Vec<&ProviderUsage> =
-            results.iter().filter_map(|(_, r)| r.as_ref().ok()).collect();
+        let providers: Vec<&ProviderUsage> = results
+            .iter()
+            .filter_map(|(_, r)| r.as_ref().ok())
+            .collect();
         let errors: std::collections::BTreeMap<&str, &String> = results
             .iter()
             .filter_map(|(name, r)| r.as_ref().err().map(|e| (*name, e)))
