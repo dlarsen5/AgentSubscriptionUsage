@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Coding-agent subscription usage in the terminal: Claude Code / Codex rate limits, OpenRouter credits, and local per-session token stats"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/dlarsen5/AgentSubscriptionUsage"
 readme = "README.md"
 keywords = ["cli", "claude", "codex", "usage", "rate-limit"]
 categories = ["command-line-utilities", "development-tools"]
