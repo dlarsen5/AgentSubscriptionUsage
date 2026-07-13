@@ -22,8 +22,9 @@ metric documentation.
 
 ```sh
 cargo build --release        # binary at target/release/agent_usage
-# or put it on your PATH:
-cargo install --path .
+make install                 # install to ~/.local/bin/agent_usage
+make install PREFIX=/usr/local   # or elsewhere (BINDIR = PREFIX/bin)
+# alternatively: cargo install --path .   (installs to ~/.cargo/bin)
 ```
 
 ## Usage
