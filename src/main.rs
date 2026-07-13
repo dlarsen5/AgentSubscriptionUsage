@@ -10,14 +10,14 @@ use std::io::IsTerminal;
 use model::ProviderUsage;
 
 const HELP: &str = "\
-agent_usage — coding-agent subscription usage from the terminal
+usage — coding-agent subscription usage from the terminal
 
 Reads local OAuth credentials for Claude Code (~/.claude/.credentials.json)
 and Codex (~/.codex/auth.json), queries each provider's usage API, and
 prints rate-limit utilization and reset times.
 
 USAGE:
-    agent_usage [OPTIONS]
+    usage [OPTIONS]
 
 Also reports OpenRouter credits/spend when a key is found (pi, opencode),
 and scans today's local session transcripts from Claude Code, Codex, pi,
@@ -35,7 +35,7 @@ OPTIONS:
 type Fetcher = fn(&str) -> Result<ProviderUsage, String>;
 
 fn main() {
-    // Restore default SIGPIPE so `agent_usage | head` exits quietly instead
+    // Restore default SIGPIPE so `usage | head` exits quietly instead
     // of panicking on a closed stdout.
     #[cfg(unix)]
     unsafe {

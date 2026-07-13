@@ -1,4 +1,4 @@
-# agent_usage
+# usage
 
 Print coding-agent subscription usage in the terminal — no web UI needed.
 
@@ -32,8 +32,8 @@ metric documentation.
 ## Build
 
 ```sh
-cargo build --release        # binary at target/release/agent_usage
-make install                 # install to ~/.local/bin/agent_usage
+cargo build --release        # binary at target/release/usage
+make install                 # install to ~/.local/bin/usage
 make install PREFIX=/usr/local   # or elsewhere (BINDIR = PREFIX/bin)
 # alternatively: cargo install --path .   (installs to ~/.cargo/bin)
 ```
@@ -41,13 +41,13 @@ make install PREFIX=/usr/local   # or elsewhere (BINDIR = PREFIX/bin)
 ## Usage
 
 ```sh
-./agent_usage                # everything: limits + today's sessions
-./agent_usage --json         # normalized JSON for scripts / monitoring
-./agent_usage --claude       # only Claude (limits + sessions)
-./agent_usage --codex        # only Codex (limits + sessions)
-./agent_usage --openrouter   # only OpenRouter (credits + pi/omp/opencode sessions)
-./agent_usage --no-sessions  # skip the local transcript scan
-AGENT_USAGE_DATE=2026-07-08 ./agent_usage   # session tables for a past day
+./usage                # everything: limits + today's sessions
+./usage --json         # normalized JSON for scripts / monitoring
+./usage --claude       # only Claude (limits + sessions)
+./usage --codex        # only Codex (limits + sessions)
+./usage --openrouter   # only OpenRouter (credits + pi/omp/opencode sessions)
+./usage --no-sessions  # skip the local transcript scan
+AGENT_USAGE_DATE=2026-07-08 ./usage   # session tables for a past day
 ```
 
 Example output:

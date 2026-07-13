@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::model::{ProviderUsage, Window};
 
@@ -20,7 +20,7 @@ struct Tokens {
 struct UsageResp {
     plan_type: Option<String>,
     rate_limit: Option<RateLimit>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     additional_rate_limits: Vec<AdditionalLimit>,
 }
 
@@ -43,6 +43,14 @@ struct RateWindow {
     reset_at: Option<i64>,
 }
 
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 pub fn fetch(home: &str) -> Result<ProviderUsage, String> {
     let path = format!("{home}/.codex/auth.json");
     let raw = std::fs::read_to_string(&path)
@@ -54,7 +62,7 @@ pub fn fetch(home: &str) -> Result<ProviderUsage, String> {
 
     let mut req = ureq::get(USAGE_URL)
         .set("Authorization", &format!("Bearer {}", tokens.access_token))
-        .set("User-Agent", "agent_usage");
+        .set("User-Agent", "usage");
     if let Some(acct) = &tokens.account_id {
         req = req.set("chatgpt-account-id", acct);
     }
@@ -120,5 +128,33 @@ fn humanize_window(seconds: Option<i64>) -> String {
         Some(s) if s % 3600 == 0 => format!("{}h", s / 3600),
         Some(s) => format!("{s}s"),
         None => "window".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UsageResp;
+
+    #[test]
+    fn usage_response_allows_null_additional_rate_limits() {
+        let raw = r#"{
+            "plan_type": "pro",
+            "rate_limit": null,
+            "additional_rate_limits": null
+        }"#;
+
+        let usage: UsageResp = serde_json::from_str(raw).unwrap();
+        assert!(usage.additional_rate_limits.is_empty());
+    }
+
+    #[test]
+    fn usage_response_allows_missing_additional_rate_limits() {
+        let raw = r#"{
+            "plan_type": "pro",
+            "rate_limit": null
+        }"#;
+
+        let usage: UsageResp = serde_json::from_str(raw).unwrap();
+        assert!(usage.additional_rate_limits.is_empty());
     }
 }

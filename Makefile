@@ -1,6 +1,6 @@
 PREFIX ?= $(HOME)/.local
 BINDIR := $(PREFIX)/bin
-BIN := target/release/agent_usage
+BIN := target/release/usage
 
 .PHONY: build check install uninstall clean
 
@@ -13,11 +13,11 @@ check:
 	cargo test --release
 
 install: build
-	install -Dm755 $(BIN) $(BINDIR)/agent_usage
-	@echo "installed $(BINDIR)/agent_usage"
+	install -Dm755 $(BIN) $(BINDIR)/usage
+	@echo "installed $(BINDIR)/usage"
 
 uninstall:
-	rm -f $(BINDIR)/agent_usage
+	rm -f $(BINDIR)/usage
 
 clean:
 	cargo clean

@@ -1,6 +1,6 @@
-# How agent_usage works
+# How usage works
 
-`agent_usage` has two independent data paths that run concurrently:
+`usage` has two independent data paths that run concurrently:
 
 1. **Limits** — live HTTP calls to each provider's own usage API, authenticated
    with the OAuth tokens / API keys the agents already store on disk.

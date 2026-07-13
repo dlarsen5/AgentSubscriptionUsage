@@ -505,7 +505,7 @@ mod tests {
     use std::fs;
 
     fn fixture_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join("agent_usage_tests").join(format!(
+        let dir = std::env::temp_dir().join("usage_tests").join(format!(
             "{}-{}",
             std::process::id(),
             name
