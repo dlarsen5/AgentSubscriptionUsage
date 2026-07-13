@@ -1,7 +1,7 @@
 use chrono::{DateTime, Datelike, Local, Utc};
 
 use crate::model::ProviderUsage;
-use crate::sessions::{ModelStat, SessionStat, Tokens};
+use crate::sessions::{ModelStat, SessionStat};
 
 const BAR_WIDTH: usize = 20;
 
@@ -69,67 +69,159 @@ pub fn print_provider(usage: &ProviderUsage, color: bool) {
 
 const TOP_SESSIONS: usize = 10;
 
+enum Align {
+    Left,
+    Right,
+}
+
+struct Table {
+    headers: Vec<&'static str>,
+    aligns: Vec<Align>,
+    rows: Vec<Vec<String>>,
+}
+
+impl Table {
+    fn print(&self, color: bool) {
+        let widths: Vec<usize> = self
+            .headers
+            .iter()
+            .enumerate()
+            .map(|(i, h)| {
+                self.rows
+                    .iter()
+                    .map(|r| r[i].chars().count())
+                    .chain([h.chars().count()])
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
+        let border = |l: &str, m: &str, r: &str| {
+            let line = widths
+                .iter()
+                .map(|w| "─".repeat(w + 2))
+                .collect::<Vec<_>>()
+                .join(m);
+            println!("{}", paint(&format!("{l}{line}{r}"), "2", color));
+        };
+        let row = |cells: Vec<String>, bold: bool| {
+            let sep = paint("│", "2", color);
+            let mut out = sep.clone();
+            for (i, cell) in cells.iter().enumerate() {
+                let w = widths[i];
+                let padded = match self.aligns[i] {
+                    Align::Left => format!(" {cell:<w$} "),
+                    Align::Right => format!(" {cell:>w$} "),
+                };
+                out.push_str(&if bold { paint(&padded, "1", color) } else { padded });
+                out.push_str(&sep);
+            }
+            println!("{out}");
+        };
+        border("┌", "┬", "┐");
+        row(self.headers.iter().map(|h| h.to_string()).collect(), true);
+        border("├", "┼", "┤");
+        for r in &self.rows {
+            row(r.clone(), false);
+        }
+        border("└", "┴", "┘");
+    }
+}
+
 pub fn print_sessions(sessions: &[SessionStat], models: &[ModelStat], color: bool) {
     if sessions.is_empty() {
         return;
     }
+    let shown = &sessions[..sessions.len().min(TOP_SESSIONS)];
+    let with_cost = sessions.iter().any(|s| s.tokens.cost_usd >= 0.005);
+
     println!();
     println!("{}", paint("Top sessions today", "1", color));
-    let shown = &sessions[..sessions.len().min(TOP_SESSIONS)];
-    let prov_w = shown.iter().map(|s| s.provider.len()).max().unwrap_or(0);
-    let proj_w = shown.iter().map(|s| s.project.len()).max().unwrap_or(0);
-    let model_w = shown
-        .iter()
-        .map(|s| short_model(&s.model).len())
-        .max()
-        .unwrap_or(0);
-    for (i, s) in shown.iter().enumerate() {
-        println!(
-            "  {:>2}. {:<prov_w$} {:<proj_w$}  {:<model_w$}  {:>3} reqs  {}  {}",
-            i + 1,
-            s.provider,
-            s.project,
-            short_model(&s.model),
-            s.requests,
-            fmt_tokens(&s.tokens),
-            paint(&s.session_id.chars().take(8).collect::<String>(), "2", color),
-        );
+    let mut table = Table {
+        headers: vec!["#", "agent", "project", "model", "reqs", "in", "out", "cache-r", "cache-w"],
+        aligns: vec![
+            Align::Right,
+            Align::Left,
+            Align::Left,
+            Align::Left,
+            Align::Right,
+            Align::Right,
+            Align::Right,
+            Align::Right,
+            Align::Right,
+        ],
+        rows: Vec::new(),
+    };
+    if with_cost {
+        table.headers.push("cost");
+        table.aligns.push(Align::Right);
     }
+    table.headers.push("session");
+    table.aligns.push(Align::Left);
+    for (i, s) in shown.iter().enumerate() {
+        let mut row = vec![
+            (i + 1).to_string(),
+            s.provider.to_string(),
+            s.project.clone(),
+            short_model(&s.model).to_string(),
+            s.requests.to_string(),
+            fmt_num(s.tokens.input),
+            fmt_num(s.tokens.output),
+            fmt_num(s.tokens.cache_read),
+            fmt_num(s.tokens.cache_write),
+        ];
+        if with_cost {
+            row.push(fmt_cost(s.tokens.cost_usd));
+        }
+        row.push(s.session_id.chars().take(8).collect());
+        table.rows.push(row);
+    }
+    table.print(color);
     if sessions.len() > TOP_SESSIONS {
         println!("  … and {} more", sessions.len() - TOP_SESSIONS);
     }
 
     println!();
     println!("{}", paint("Today by model", "1", color));
-    let model_w = models
-        .iter()
-        .map(|m| short_model(&m.model).len())
-        .max()
-        .unwrap_or(0);
-    for m in models {
-        println!(
-            "  {:<model_w$}  {:>2} sessions  {}",
-            short_model(&m.model),
-            m.sessions,
-            fmt_tokens(&m.tokens),
-        );
+    let model_cost = models.iter().any(|m| m.tokens.cost_usd >= 0.005);
+    let mut table = Table {
+        headers: vec!["model", "sessions", "in", "out", "cache-r", "cache-w"],
+        aligns: vec![
+            Align::Left,
+            Align::Right,
+            Align::Right,
+            Align::Right,
+            Align::Right,
+            Align::Right,
+        ],
+        rows: Vec::new(),
+    };
+    if model_cost {
+        table.headers.push("cost");
+        table.aligns.push(Align::Right);
     }
+    for m in models {
+        let mut row = vec![
+            short_model(&m.model).to_string(),
+            m.sessions.to_string(),
+            fmt_num(m.tokens.input),
+            fmt_num(m.tokens.output),
+            fmt_num(m.tokens.cache_read),
+            fmt_num(m.tokens.cache_write),
+        ];
+        if model_cost {
+            row.push(fmt_cost(m.tokens.cost_usd));
+        }
+        table.rows.push(row);
+    }
+    table.print(color);
 }
 
-fn fmt_tokens(t: &Tokens) -> String {
-    let cost = if t.cost_usd >= 0.005 {
-        format!("  ${:.2}", t.cost_usd)
+fn fmt_cost(cost: f64) -> String {
+    if cost >= 0.005 {
+        format!("${cost:.2}")
     } else {
         String::new()
-    };
-    format!(
-        "in {:>6}  out {:>6}  cache-r {:>6}  cache-w {:>6}{}",
-        fmt_num(t.input),
-        fmt_num(t.output),
-        fmt_num(t.cache_read),
-        fmt_num(t.cache_write),
-        cost,
-    )
+    }
 }
 
 fn fmt_num(n: u64) -> String {

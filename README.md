@@ -58,15 +58,25 @@ OpenRouter (pay-as-you-go)
   Spend      today $0.00 · 7d $0.02 · 30d $0.02
 
 Top sessions today
-   1. claude moneymachine     fable-5   66 reqs  in  12.0k  out  37.1k  cache-r  26.0M  cache-w 424.5k  8c4045c2
-   2. codex  polecat          gpt-5.5  124 reqs  in 246.9k  out  41.3k  cache-r  15.8M  cache-w      0  019f5715
-   3. omp    local_llm        gpt-5.5    4 reqs  in  28.3k  out   1.3k  cache-r  67.6k  cache-w      0  $0.21  019f43a6
-   ...
+┌───┬────────┬──────────────┬─────────┬──────┬────────┬────────┬─────────┬─────────┬───────┬──────────┐
+│ # │ agent  │ project      │ model   │ reqs │     in │    out │ cache-r │ cache-w │  cost │ session  │
+├───┼────────┼──────────────┼─────────┼──────┼────────┼────────┼─────────┼─────────┼───────┼──────────┤
+│ 1 │ claude │ moneymachine │ fable-5 │   66 │  12.0k │  37.1k │   26.0M │  424.5k │       │ 8c4045c2 │
+│ 2 │ codex  │ polecat      │ gpt-5.5 │  124 │ 246.9k │  41.3k │   15.8M │       0 │       │ 019f5715 │
+│ 3 │ omp    │ local_llm    │ gpt-5.5 │    4 │  28.3k │   1.3k │   67.6k │       0 │ $0.21 │ 019f43a6 │
+└───┴────────┴──────────────┴─────────┴──────┴────────┴────────┴─────────┴─────────┴───────┴──────────┘
 
 Today by model
-  gpt-5.5  10 sessions  in   1.6M  out 220.7k  cache-r  50.5M  cache-w      0
-  fable-5   2 sessions  in  12.1k  out 108.8k  cache-r  32.6M  cache-w 555.5k
+┌─────────┬──────────┬────────┬────────┬─────────┬─────────┐
+│ model   │ sessions │     in │    out │ cache-r │ cache-w │
+├─────────┼──────────┼────────┼────────┼─────────┼─────────┤
+│ gpt-5.5 │       10 │   1.6M │ 220.7k │   50.5M │       0 │
+│ fable-5 │        2 │  12.1k │ 108.8k │   32.6M │  555.5k │
+└─────────┴──────────┴────────┴────────┴─────────┴─────────┘
 ```
+
+The `cost` column only appears when at least one row has a recorded
+per-message cost (pi, omp, opencode).
 
 Reset times are shown in local time with a relative countdown. Bars turn
 yellow at 50% and red at 80%. `NO_COLOR` and non-TTY output disable color.
