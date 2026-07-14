@@ -30,6 +30,7 @@ OPTIONS:
     --codex        only Codex (limits + sessions)
     --cursor       only Cursor (included-usage limits)
     --openrouter   only OpenRouter (credits + pi/omp/opencode sessions)
+    --history [N]  daily usage graph for the trailing N days (default 14, max 90)
     --no-sessions  skip the local top-sessions / by-model scan
     -h, --help     show this help
 ";
@@ -46,15 +47,26 @@ fn main() {
 
     let mut json = false;
     let mut scan_sessions = true;
+    let mut history: Option<u32> = None;
     let mut only: Option<&str> = None;
-    for arg in std::env::args().skip(1) {
-        match arg.as_str() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
             "--json" => json = true,
             "--claude" => only = Some("claude"),
             "--codex" => only = Some("codex"),
             "--cursor" => only = Some("cursor"),
             "--openrouter" => only = Some("openrouter"),
             "--no-sessions" => scan_sessions = false,
+            "--history" => {
+                let days = args
+                    .get(i + 1)
+                    .and_then(|n| n.parse::<u32>().ok())
+                    .inspect(|_| i += 1)
+                    .unwrap_or(14);
+                history = Some(days.clamp(1, 90));
+            }
             "-h" | "--help" => {
                 print!("{HELP}");
                 return;
@@ -64,6 +76,7 @@ fn main() {
                 std::process::exit(2);
             }
         }
+        i += 1;
     }
 
     let home = match std::env::var("HOME") {
@@ -128,6 +141,18 @@ fn main() {
     }
     let model_totals = sessions::aggregate_models(&top_sessions);
 
+    let mut daily_history = history
+        .map(|days| sessions::collect_daily(&home, days))
+        .unwrap_or_default();
+    if let Some(o) = only {
+        for day in &mut daily_history {
+            day.by_provider.retain(|p, _| match o {
+                "openrouter" => matches!(*p, "pi" | "omp" | "opencode"),
+                _ => *p == o,
+            });
+        }
+    }
+
     let mut results: Vec<(&str, Result<ProviderUsage, String>)> = Vec::new();
     for (name, handle) in handles {
         let result = handle
@@ -153,6 +178,7 @@ fn main() {
             "errors": errors,
             "sessions_today": top_sessions,
             "models_today": model_totals,
+            "daily_history": daily_history,
         });
         println!("{}", serde_json::to_string_pretty(&out).unwrap());
     } else {
@@ -168,6 +194,7 @@ fn main() {
                 Err(err) => eprintln!("{name}: {err}"),
             }
         }
+        render::print_history(&daily_history, color);
         render::print_sessions(&top_sessions, &model_totals, color);
     }
 

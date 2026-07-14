@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -38,6 +38,26 @@ impl Tokens {
     }
 }
 
+/// Inclusive day range that transcript scanners bucket usage into.
+#[derive(Clone, Copy)]
+struct DateRange {
+    start: NaiveDate,
+    end: NaiveDate,
+}
+
+impl DateRange {
+    fn single(day: NaiveDate) -> Self {
+        DateRange {
+            start: day,
+            end: day,
+        }
+    }
+
+    fn contains(&self, day: NaiveDate) -> bool {
+        day >= self.start && day <= self.end
+    }
+}
+
 #[derive(Serialize)]
 pub struct SessionStat {
     pub provider: &'static str,
@@ -48,6 +68,8 @@ pub struct SessionStat {
     pub tokens: Tokens,
     #[serde(skip)]
     by_model: HashMap<String, Tokens>,
+    #[serde(skip)]
+    by_day: HashMap<NaiveDate, Tokens>,
 }
 
 #[derive(Serialize)]
@@ -57,31 +79,87 @@ pub struct ModelStat {
     pub tokens: Tokens,
 }
 
-/// Scan local session transcripts from all agents for today's usage,
-/// sorted by estimated limit consumption. AGENT_USAGE_DATE=YYYY-MM-DD
-/// overrides "today" to inspect a past day.
-pub fn collect_today(home: &str) -> Vec<SessionStat> {
-    let today = std::env::var("AGENT_USAGE_DATE")
+/// Per-day usage totals across all agents, for the trailing history graph.
+#[derive(Serialize)]
+pub struct DayStat {
+    pub date: NaiveDate,
+    pub by_provider: BTreeMap<&'static str, Tokens>,
+}
+
+impl DayStat {
+    pub fn total_score(&self) -> f64 {
+        self.by_provider.values().map(Tokens::score).sum()
+    }
+}
+
+/// Anchor day for "today": overridable via AGENT_USAGE_DATE=YYYY-MM-DD to
+/// inspect a past day.
+fn anchor_day() -> NaiveDate {
+    std::env::var("AGENT_USAGE_DATE")
         .ok()
         .and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
-        .unwrap_or_else(|| Local::now().date_naive());
+        .unwrap_or_else(|| Local::now().date_naive())
+}
+
+fn scan_all(home: &str, range: DateRange) -> Vec<SessionStat> {
     let mut sessions = Vec::new();
-    sessions.extend(scan_claude(home, today));
-    sessions.extend(scan_codex(home, today));
+    sessions.extend(scan_claude(home, range));
+    sessions.extend(scan_codex(home, range));
     sessions.extend(scan_pi_like(
         &PathBuf::from(format!("{home}/.pi/agent/sessions")),
         "pi",
-        today,
+        range,
     ));
     sessions.extend(scan_pi_like(
         &PathBuf::from(format!("{home}/.omp/agent/sessions")),
         "omp",
-        today,
+        range,
     ));
-    sessions.extend(scan_opencode(home, today));
+    sessions.extend(scan_opencode(home, range));
+    sessions
+}
+
+/// Scan local session transcripts from all agents for today's usage,
+/// sorted by estimated limit consumption.
+pub fn collect_today(home: &str) -> Vec<SessionStat> {
+    let mut sessions = scan_all(home, DateRange::single(anchor_day()));
     sessions.retain(|s| s.tokens.score() > 0.0);
     sessions.sort_by(|a, b| b.tokens.score().total_cmp(&a.tokens.score()));
     sessions
+}
+
+/// Per-day usage for the `days` ending today (inclusive), oldest first.
+/// Every day in the window is present, so graphs stay continuous.
+pub fn collect_daily(home: &str, days: u32) -> Vec<DayStat> {
+    let end = anchor_day();
+    let start = end - chrono::Days::new(u64::from(days.saturating_sub(1)));
+    let range = DateRange { start, end };
+
+    let mut by_day: BTreeMap<NaiveDate, BTreeMap<&'static str, Tokens>> = BTreeMap::new();
+    let mut day = start;
+    loop {
+        by_day.insert(day, BTreeMap::new());
+        if day >= end {
+            break;
+        }
+        day = day.succ_opt().expect("date overflow");
+    }
+
+    for session in scan_all(home, range) {
+        for (date, tokens) in &session.by_day {
+            by_day
+                .entry(*date)
+                .or_default()
+                .entry(session.provider)
+                .or_default()
+                .add(tokens);
+        }
+    }
+
+    by_day
+        .into_iter()
+        .map(|(date, by_provider)| DayStat { date, by_provider })
+        .collect()
 }
 
 pub fn aggregate_models(sessions: &[SessionStat]) -> Vec<ModelStat> {
@@ -102,22 +180,24 @@ pub fn aggregate_models(sessions: &[SessionStat]) -> Vec<ModelStat> {
     models
 }
 
-/// Files modified today (a session started yesterday can still contain
-/// today's entries; per-line timestamps do the precise filtering).
-fn modified_today(path: &Path, today: NaiveDate) -> bool {
+/// Files last modified on or after the range start may contain in-range
+/// entries (a file can't contain entries newer than its mtime); per-line
+/// timestamps do the precise filtering.
+fn modified_in_range(path: &Path, range: DateRange) -> bool {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
-        .map(|t| DateTime::<Local>::from(t).date_naive() == today)
+        .map(|t| DateTime::<Local>::from(t).date_naive() >= range.start)
         .unwrap_or(false)
 }
 
-fn is_today(line: &Value, today: NaiveDate) -> bool {
-    match line.get("timestamp").and_then(Value::as_str) {
-        Some(ts) => DateTime::parse_from_rfc3339(ts)
-            .map(|dt| dt.with_timezone(&Local).date_naive() == today)
-            .unwrap_or(true),
-        None => true,
-    }
+/// Local-time day of a transcript line; lines without a parseable timestamp
+/// are attributed to the range end (matching the old "assume today").
+fn line_day(line: &Value, range: DateRange) -> NaiveDate {
+    line.get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(|ts| DateTime::parse_from_rfc3339(ts).ok())
+        .map(|dt| dt.with_timezone(&Local).date_naive())
+        .unwrap_or(range.end)
 }
 
 fn last_path_component(p: &str) -> String {
@@ -138,15 +218,34 @@ fn read_lines(path: &Path) -> Option<impl Iterator<Item = Value>> {
     )
 }
 
-fn scan_claude(home: &str, today: NaiveDate) -> Vec<SessionStat> {
+/// Accumulates one provider file's usage into the per-model / per-day maps.
+#[derive(Default)]
+struct FileAcc {
+    by_model: HashMap<String, Tokens>,
+    by_day: HashMap<NaiveDate, Tokens>,
+    requests: u64,
+}
+
+impl FileAcc {
+    fn record(&mut self, day: NaiveDate, model: &str, tokens: Tokens) {
+        self.by_model
+            .entry(model.to_string())
+            .or_default()
+            .add(&tokens);
+        self.by_day.entry(day).or_default().add(&tokens);
+        self.requests += 1;
+    }
+}
+
+fn scan_claude(home: &str, range: DateRange) -> Vec<SessionStat> {
     let root = PathBuf::from(format!("{home}/.claude/projects"));
     let mut out = Vec::new();
     for project_dir in read_dir_paths(&root) {
         for file in read_dir_paths(&project_dir) {
-            if file.extension().is_none_or(|e| e != "jsonl") || !modified_today(&file, today) {
+            if file.extension().is_none_or(|e| e != "jsonl") || !modified_in_range(&file, range) {
                 continue;
             }
-            if let Some(stat) = scan_claude_file(&file, today) {
+            if let Some(stat) = scan_claude_file(&file, range) {
                 out.push(stat);
             }
         }
@@ -154,11 +253,10 @@ fn scan_claude(home: &str, today: NaiveDate) -> Vec<SessionStat> {
     out
 }
 
-fn scan_claude_file(path: &Path, today: NaiveDate) -> Option<SessionStat> {
-    let mut by_model: HashMap<String, Tokens> = HashMap::new();
+fn scan_claude_file(path: &Path, range: DateRange) -> Option<SessionStat> {
+    let mut acc = FileAcc::default();
     let mut seen_ids: HashSet<String> = HashSet::new();
     let mut cwd = None;
-    let mut requests = 0u64;
 
     for line in read_lines(path)? {
         if cwd.is_none()
@@ -172,7 +270,8 @@ fn scan_claude_file(path: &Path, today: NaiveDate) -> Option<SessionStat> {
         let Some(usage) = message.get("usage") else {
             continue;
         };
-        if !is_today(&line, today) {
+        let day = line_day(&line, range);
+        if !range.contains(day) {
             continue;
         }
         // Streaming rewrites the same message on multiple lines; count each
@@ -190,14 +289,17 @@ fn scan_claude_file(path: &Path, today: NaiveDate) -> Option<SessionStat> {
             continue;
         }
         let get = |k: &str| usage.get(k).and_then(Value::as_u64).unwrap_or(0);
-        by_model.entry(model.to_string()).or_default().add(&Tokens {
-            input: get("input_tokens"),
-            output: get("output_tokens"),
-            cache_read: get("cache_read_input_tokens"),
-            cache_write: get("cache_creation_input_tokens"),
-            cost_usd: 0.0,
-        });
-        requests += 1;
+        acc.record(
+            day,
+            model,
+            Tokens {
+                input: get("input_tokens"),
+                output: get("output_tokens"),
+                cache_read: get("cache_read_input_tokens"),
+                cache_write: get("cache_creation_input_tokens"),
+                cost_usd: 0.0,
+            },
+        );
     }
 
     let session_id = path.file_stem()?.to_string_lossy().to_string();
@@ -205,12 +307,10 @@ fn scan_claude_file(path: &Path, today: NaiveDate) -> Option<SessionStat> {
         .as_deref()
         .map(last_path_component)
         .unwrap_or_else(|| "unknown".to_string());
-    Some(finish_session(
-        "claude", project, session_id, requests, by_model,
-    ))
+    Some(finish_session("claude", project, session_id, acc))
 }
 
-fn scan_codex(home: &str, today: NaiveDate) -> Vec<SessionStat> {
+fn scan_codex(home: &str, range: DateRange) -> Vec<SessionStat> {
     let root = PathBuf::from(format!("{home}/.codex/sessions"));
     let mut out = Vec::new();
     let mut stack = vec![root];
@@ -219,8 +319,8 @@ fn scan_codex(home: &str, today: NaiveDate) -> Vec<SessionStat> {
             if path.is_dir() {
                 stack.push(path);
             } else if path.extension().is_some_and(|e| e == "jsonl")
-                && modified_today(&path, today)
-                && let Some(stat) = scan_codex_file(&path, today)
+                && modified_in_range(&path, range)
+                && let Some(stat) = scan_codex_file(&path, range)
             {
                 out.push(stat);
             }
@@ -229,12 +329,11 @@ fn scan_codex(home: &str, today: NaiveDate) -> Vec<SessionStat> {
     out
 }
 
-fn scan_codex_file(path: &Path, today: NaiveDate) -> Option<SessionStat> {
-    let mut by_model: HashMap<String, Tokens> = HashMap::new();
+fn scan_codex_file(path: &Path, range: DateRange) -> Option<SessionStat> {
+    let mut acc = FileAcc::default();
     let mut cwd = None;
     let mut session_id = None;
     let mut model = "unknown".to_string();
-    let mut requests = 0u64;
 
     for line in read_lines(path)? {
         let Some(payload) = line.get("payload") else {
@@ -264,24 +363,28 @@ fn scan_codex_file(path: &Path, today: NaiveDate) -> Option<SessionStat> {
                 if payload.get("type").and_then(Value::as_str) == Some("token_count") =>
             {
                 // Sum per-request deltas (`last_token_usage`) instead of the
-                // cumulative total so a session spanning midnight only counts
-                // today's part.
+                // cumulative total so a session spanning midnight attributes
+                // each part to its own day.
                 let Some(last) = payload.get("info").and_then(|i| i.get("last_token_usage")) else {
                     continue;
                 };
-                if !is_today(&line, today) {
+                let day = line_day(&line, range);
+                if !range.contains(day) {
                     continue;
                 }
                 let get = |k: &str| last.get(k).and_then(Value::as_u64).unwrap_or(0);
                 let cached = get("cached_input_tokens");
-                requests += 1;
-                by_model.entry(model.clone()).or_default().add(&Tokens {
-                    input: get("input_tokens").saturating_sub(cached),
-                    output: get("output_tokens"),
-                    cache_read: cached,
-                    cache_write: 0,
-                    cost_usd: 0.0,
-                });
+                acc.record(
+                    day,
+                    &model.clone(),
+                    Tokens {
+                        input: get("input_tokens").saturating_sub(cached),
+                        output: get("output_tokens"),
+                        cache_read: cached,
+                        cache_write: 0,
+                        cost_usd: 0.0,
+                    },
+                );
             }
             _ => {}
         }
@@ -297,22 +400,20 @@ fn scan_codex_file(path: &Path, today: NaiveDate) -> Option<SessionStat> {
         .as_deref()
         .map(last_path_component)
         .unwrap_or_else(|| "unknown".to_string());
-    Some(finish_session(
-        "codex", project, session_id, requests, by_model,
-    ))
+    Some(finish_session("codex", project, session_id, acc))
 }
 
 /// pi and oh-my-pi (omp) share the same session format: a `session` header
 /// line with the cwd, then `message` lines whose assistant entries carry
 /// `usage` with token counts and a computed cost.
-fn scan_pi_like(root: &Path, provider: &'static str, today: NaiveDate) -> Vec<SessionStat> {
+fn scan_pi_like(root: &Path, provider: &'static str, range: DateRange) -> Vec<SessionStat> {
     let mut out = Vec::new();
     for project_dir in read_dir_paths(root) {
         for file in read_dir_paths(&project_dir) {
-            if file.extension().is_none_or(|e| e != "jsonl") || !modified_today(&file, today) {
+            if file.extension().is_none_or(|e| e != "jsonl") || !modified_in_range(&file, range) {
                 continue;
             }
-            if let Some(stat) = scan_pi_file(&file, provider, today) {
+            if let Some(stat) = scan_pi_file(&file, provider, range) {
                 out.push(stat);
             }
         }
@@ -320,11 +421,10 @@ fn scan_pi_like(root: &Path, provider: &'static str, today: NaiveDate) -> Vec<Se
     out
 }
 
-fn scan_pi_file(path: &Path, provider: &'static str, today: NaiveDate) -> Option<SessionStat> {
-    let mut by_model: HashMap<String, Tokens> = HashMap::new();
+fn scan_pi_file(path: &Path, provider: &'static str, range: DateRange) -> Option<SessionStat> {
+    let mut acc = FileAcc::default();
     let mut cwd = None;
     let mut session_id = None;
-    let mut requests = 0u64;
 
     for line in read_lines(path)? {
         match line.get("type").and_then(Value::as_str) {
@@ -342,7 +442,8 @@ fn scan_pi_file(path: &Path, provider: &'static str, today: NaiveDate) -> Option
                 let Some(usage) = message.get("usage") else {
                     continue;
                 };
-                if !is_today(&line, today) {
+                let day = line_day(&line, range);
+                if !range.contains(day) {
                     continue;
                 }
                 let model = message
@@ -355,14 +456,17 @@ fn scan_pi_file(path: &Path, provider: &'static str, today: NaiveDate) -> Option
                     .and_then(|c| c.get("total"))
                     .and_then(Value::as_f64)
                     .unwrap_or(0.0);
-                by_model.entry(model.to_string()).or_default().add(&Tokens {
-                    input: get("input"),
-                    output: get("output"),
-                    cache_read: get("cacheRead"),
-                    cache_write: get("cacheWrite"),
-                    cost_usd: cost,
-                });
-                requests += 1;
+                acc.record(
+                    day,
+                    model,
+                    Tokens {
+                        input: get("input"),
+                        output: get("output"),
+                        cache_read: get("cacheRead"),
+                        cache_write: get("cacheWrite"),
+                        cost_usd: cost,
+                    },
+                );
             }
             _ => {}
         }
@@ -378,28 +482,25 @@ fn scan_pi_file(path: &Path, provider: &'static str, today: NaiveDate) -> Option
         .as_deref()
         .map(last_path_component)
         .unwrap_or_else(|| "unknown".to_string());
-    Some(finish_session(
-        provider, project, session_id, requests, by_model,
-    ))
+    Some(finish_session(provider, project, session_id, acc))
 }
 
 /// opencode stores one JSON file per message under
 /// storage/message/<sessionID>/msg_*.json; assistant messages carry
 /// `tokens`, `cost`, `modelID` and the session cwd.
-fn scan_opencode(home: &str, today: NaiveDate) -> Vec<SessionStat> {
+fn scan_opencode(home: &str, range: DateRange) -> Vec<SessionStat> {
     let root = PathBuf::from(format!("{home}/.local/share/opencode/storage/message"));
     let mut out = Vec::new();
     for session_dir in read_dir_paths(&root) {
         // Message files are written once, so the dir mtime tracks the last
-        // message; skip sessions untouched today.
-        if !session_dir.is_dir() || !modified_today(&session_dir, today) {
+        // message; skip sessions untouched within the range.
+        if !session_dir.is_dir() || !modified_in_range(&session_dir, range) {
             continue;
         }
-        let mut by_model: HashMap<String, Tokens> = HashMap::new();
+        let mut acc = FileAcc::default();
         let mut cwd = None;
-        let mut requests = 0u64;
         for file in read_dir_paths(&session_dir) {
-            if file.extension().is_none_or(|e| e != "json") || !modified_today(&file, today) {
+            if file.extension().is_none_or(|e| e != "json") || !modified_in_range(&file, range) {
                 continue;
             }
             let Ok(raw) = std::fs::read_to_string(&file) else {
@@ -411,14 +512,14 @@ fn scan_opencode(home: &str, today: NaiveDate) -> Vec<SessionStat> {
             if msg.get("role").and_then(Value::as_str) != Some("assistant") {
                 continue;
             }
-            let created_today = msg
+            let day = msg
                 .get("time")
                 .and_then(|t| t.get("created"))
                 .and_then(Value::as_i64)
-                .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
-                .map(|dt| dt.with_timezone(&Local).date_naive() == today)
-                .unwrap_or(true);
-            if !created_today {
+                .and_then(DateTime::<chrono::Utc>::from_timestamp_millis)
+                .map(|dt| dt.with_timezone(&Local).date_naive())
+                .unwrap_or(range.end);
+            if !range.contains(day) {
                 continue;
             }
             if cwd.is_none() {
@@ -430,7 +531,8 @@ fn scan_opencode(home: &str, today: NaiveDate) -> Vec<SessionStat> {
             let model = msg
                 .get("modelID")
                 .and_then(Value::as_str)
-                .unwrap_or("unknown");
+                .unwrap_or("unknown")
+                .to_string();
             let tokens = &msg["tokens"];
             let get = |k: &str| tokens.get(k).and_then(Value::as_u64).unwrap_or(0);
             let cache = |k: &str| {
@@ -439,15 +541,18 @@ fn scan_opencode(home: &str, today: NaiveDate) -> Vec<SessionStat> {
                     .and_then(Value::as_u64)
                     .unwrap_or(0)
             };
-            by_model.entry(model.to_string()).or_default().add(&Tokens {
-                input: get("input"),
-                // reasoning tokens are billed as output
-                output: get("output") + get("reasoning"),
-                cache_read: cache("read"),
-                cache_write: cache("write"),
-                cost_usd: msg.get("cost").and_then(Value::as_f64).unwrap_or(0.0),
-            });
-            requests += 1;
+            acc.record(
+                day,
+                &model,
+                Tokens {
+                    input: get("input"),
+                    // reasoning tokens are billed as output
+                    output: get("output") + get("reasoning"),
+                    cache_read: cache("read"),
+                    cache_write: cache("write"),
+                    cost_usd: msg.get("cost").and_then(Value::as_f64).unwrap_or(0.0),
+                },
+            );
         }
         let session_id = session_dir
             .file_name()
@@ -458,9 +563,7 @@ fn scan_opencode(home: &str, today: NaiveDate) -> Vec<SessionStat> {
             .as_deref()
             .map(last_path_component)
             .unwrap_or_else(|| "unknown".to_string());
-        out.push(finish_session(
-            "opencode", project, session_id, requests, by_model,
-        ));
+        out.push(finish_session("opencode", project, session_id, acc));
     }
     out
 }
@@ -469,14 +572,14 @@ fn finish_session(
     provider: &'static str,
     project: String,
     session_id: String,
-    requests: u64,
-    by_model: HashMap<String, Tokens>,
+    acc: FileAcc,
 ) -> SessionStat {
     let mut totals = Tokens::default();
-    for t in by_model.values() {
+    for t in acc.by_model.values() {
         totals.add(t);
     }
-    let dominant = by_model
+    let dominant = acc
+        .by_model
         .iter()
         .max_by(|a, b| a.1.score().total_cmp(&b.1.score()))
         .map(|(m, _)| m.clone())
@@ -486,9 +589,10 @@ fn finish_session(
         project,
         session_id,
         model: dominant,
-        requests,
+        requests: acc.requests,
         tokens: totals,
-        by_model,
+        by_model: acc.by_model,
+        by_day: acc.by_day,
     }
 }
 
@@ -518,6 +622,10 @@ mod tests {
         NaiveDate::from_ymd_opt(2026, 1, 15).unwrap()
     }
 
+    fn single() -> DateRange {
+        DateRange::single(day())
+    }
+
     #[test]
     fn claude_dedups_streaming_lines_and_skips_synthetic() {
         let dir = fixture_dir("claude");
@@ -532,7 +640,7 @@ mod tests {
         )
         .unwrap();
 
-        let stat = scan_claude_file(&file, day()).unwrap();
+        let stat = scan_claude_file(&file, single()).unwrap();
         assert_eq!(stat.requests, 1);
         assert_eq!(stat.tokens.input, 10);
         assert_eq!(stat.tokens.output, 100);
@@ -558,7 +666,7 @@ mod tests {
         ];
         fs::write(&file, lines.join("\n")).unwrap();
 
-        let stat = scan_codex_file(&file, day()).unwrap();
+        let stat = scan_codex_file(&file, single()).unwrap();
         assert_eq!(stat.requests, 1);
         assert_eq!(stat.tokens.input, 60);
         assert_eq!(stat.tokens.cache_read, 40);
@@ -579,7 +687,7 @@ mod tests {
         ];
         fs::write(&file, lines.join("\n")).unwrap();
 
-        let stat = scan_pi_file(&file, "pi", day()).unwrap();
+        let stat = scan_pi_file(&file, "pi", single()).unwrap();
         assert_eq!(stat.provider, "pi");
         assert_eq!(stat.requests, 1);
         assert_eq!(stat.tokens.input, 5);
@@ -589,6 +697,33 @@ mod tests {
         assert!((stat.tokens.cost_usd - 0.5).abs() < 1e-9);
         assert_eq!(stat.session_id, "pi-1");
         assert_eq!(stat.project, "projz");
+    }
+
+    #[test]
+    fn multi_day_range_buckets_usage_per_day() {
+        let dir = fixture_dir("pi-multiday");
+        let file = dir.join("2026-01-14T12-00-00-000Z_def.jsonl");
+        let lines = [
+            r#"{"type":"session","id":"pi-2","timestamp":"2026-01-14T11:59:00Z","cwd":"/home/u/projz"}"#,
+            r#"{"type":"message","timestamp":"2026-01-14T12:00:00Z","message":{"role":"assistant","model":"m/x","usage":{"input":10,"output":1,"cacheRead":0,"cacheWrite":0,"cost":{"total":0}}}}"#,
+            r#"{"type":"message","timestamp":"2026-01-15T09:00:00Z","message":{"role":"assistant","model":"m/x","usage":{"input":20,"output":2,"cacheRead":0,"cacheWrite":0,"cost":{"total":0}}}}"#,
+            // outside the range — dropped
+            r#"{"type":"message","timestamp":"2026-01-05T09:00:00Z","message":{"role":"assistant","model":"m/x","usage":{"input":999,"output":999,"cacheRead":0,"cacheWrite":0,"cost":{"total":0}}}}"#,
+        ];
+        fs::write(&file, lines.join("\n")).unwrap();
+
+        let range = DateRange {
+            start: NaiveDate::from_ymd_opt(2026, 1, 14).unwrap(),
+            end: day(),
+        };
+        let stat = scan_pi_file(&file, "pi", range).unwrap();
+        assert_eq!(stat.requests, 2);
+        assert_eq!(stat.tokens.input, 30);
+        let d14 = &stat.by_day[&NaiveDate::from_ymd_opt(2026, 1, 14).unwrap()];
+        let d15 = &stat.by_day[&day()];
+        assert_eq!(d14.input, 10);
+        assert_eq!(d15.input, 20);
+        assert_eq!(stat.by_day.len(), 2);
     }
 
     #[test]
@@ -605,7 +740,10 @@ mod tests {
         fs::write(ses.join("msg1.json"), assistant).unwrap();
         fs::write(ses.join("msg0.json"), r#"{"id":"msg0","role":"user"}"#).unwrap();
 
-        let stats = scan_opencode(home.to_str().unwrap(), Local::now().date_naive());
+        let stats = scan_opencode(
+            home.to_str().unwrap(),
+            DateRange::single(Local::now().date_naive()),
+        );
         assert_eq!(stats.len(), 1);
         let stat = &stats[0];
         assert_eq!(stat.provider, "opencode");

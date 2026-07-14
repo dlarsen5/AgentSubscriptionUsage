@@ -57,6 +57,14 @@ All scanners follow the same rules:
   day.
 - Sessions whose ranking weight is zero (e.g. free/local models reporting no
   tokens) are dropped.
+- `--history [N]` runs the same scanners over an N-day range in one pass
+  (files are selected by `mtime >= window start`; each usage record is
+  bucketed into its own day by line timestamp) and renders per-day totals as
+  stacked bars, one segment per agent, scaled to the window maximum and
+  weighted by the ranking formula below. Empty days render as "—" so the
+  graph stays continuous. Cursor cannot appear (no local token data), and
+  historical limit-percent isn't reconstructable — providers only report the
+  current window, so daily consumption is the graphable signal.
 
 Per-agent specifics:
 

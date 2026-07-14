@@ -1,7 +1,7 @@
 use chrono::{DateTime, Datelike, Local, Utc};
 
 use crate::model::ProviderUsage;
-use crate::sessions::{ModelStat, SessionStat};
+use crate::sessions::{DayStat, ModelStat, SessionStat};
 
 const BAR_WIDTH: usize = 20;
 
@@ -221,6 +221,92 @@ pub fn print_sessions(sessions: &[SessionStat], models: &[ModelStat], color: boo
         table.rows.push(row);
     }
     table.print(color);
+}
+
+const HISTORY_BAR_WIDTH: usize = 40;
+
+/// (provider, ANSI color, glyph for no-color output)
+const PROVIDER_STYLES: [(&str, &str, char); 5] = [
+    ("claude", "33", '█'),
+    ("codex", "36", '▓'),
+    ("pi", "34", '▒'),
+    ("omp", "35", '░'),
+    ("opencode", "32", '▪'),
+];
+
+pub fn print_history(days: &[DayStat], color: bool) {
+    if days.is_empty() {
+        return;
+    }
+    let max = days
+        .iter()
+        .map(DayStat::total_score)
+        .fold(0.0_f64, f64::max);
+
+    println!();
+    println!(
+        "{}",
+        paint(
+            &format!("Daily usage — last {} days (weighted tokens)", days.len()),
+            "1",
+            color,
+        )
+    );
+    if max <= 0.0 {
+        println!("  no local usage recorded in this window");
+        return;
+    }
+
+    for day in days {
+        let mut bar = String::new();
+        let mut filled = 0usize;
+        let mut cum = 0.0;
+        for (provider, code, glyph) in PROVIDER_STYLES {
+            let Some(tokens) = day.by_provider.get(provider) else {
+                continue;
+            };
+            cum += tokens.score();
+            let target = ((cum / max) * HISTORY_BAR_WIDTH as f64).round() as usize;
+            let width = target.saturating_sub(filled);
+            if width > 0 {
+                let seg = if color {
+                    "█".repeat(width)
+                } else {
+                    glyph.to_string().repeat(width)
+                };
+                bar.push_str(&paint(&seg, code, color));
+                filled = target;
+            }
+        }
+        let total = day.total_score();
+        let label = if total > 0.0 {
+            fmt_num(total as u64)
+        } else {
+            "—".to_string()
+        };
+        // Format width counts ANSI escape characters too, so widen the pad
+        // by the bar's invisible overhead to keep the totals column aligned.
+        let pad = HISTORY_BAR_WIDTH + (bar.chars().count() - filled);
+        println!(
+            "  {}  {:<pad$}  {}",
+            day.date.format("%a %b %d"),
+            bar,
+            label,
+        );
+    }
+
+    let legend = PROVIDER_STYLES
+        .iter()
+        .filter(|(p, _, _)| days.iter().any(|d| d.by_provider.contains_key(p)))
+        .map(|(p, code, glyph)| {
+            let block = if color { '█' } else { *glyph };
+            format!("{} {p}", paint(&block.to_string(), code, color))
+        })
+        .collect::<Vec<_>>()
+        .join("  ");
+    if !legend.is_empty() {
+        println!("  {legend}");
+    }
 }
 
 fn fmt_cost(cost: f64) -> String {

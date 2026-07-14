@@ -49,6 +49,8 @@ make install PREFIX=/usr/local   # or elsewhere (BINDIR = PREFIX/bin)
 ./usage --cursor       # only Cursor (included-usage limits)
 ./usage --openrouter   # only OpenRouter (credits + pi/omp/opencode sessions)
 ./usage --no-sessions  # skip the local transcript scan
+./usage --history      # daily usage graph, trailing 14 days
+./usage --history 30   # …or any window up to 90 days
 AGENT_USAGE_DATE=2026-07-08 ./usage   # session tables for a past day
 ```
 
@@ -93,6 +95,26 @@ Today by model
 
 The `cost` column only appears when at least one row has a recorded
 per-message cost (pi, omp, opencode).
+
+`--history [N]` adds a trailing daily-usage graph built from the same local
+transcripts, with one stacked bar per day colored by agent:
+
+```
+Daily usage — last 7 days (weighted tokens)
+  Wed Jul 08  █████▓▓                                   16.5M
+  Thu Jul 09  █████▓                                    20.7M
+  Fri Jul 10  ████████▓▓                                42.7M
+  Sat Jul 11  ██▓                                        7.4M
+  Sun Jul 12  ███████████▓▓▓▓▓▓▓▓▓▓▓▓                  128.4M
+  Mon Jul 13  ████████████████▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ 178.1M
+  Tue Jul 14  ██▓▓                                      21.6M
+  █ claude  ▓ codex
+```
+
+Cursor is absent from the graph for the same reason it has no session rows:
+no local token data. Historical limit-percentages aren't shown because
+providers only report the current window — daily consumption is the
+available signal.
 
 Reset times are shown in local time with a relative countdown. Bars turn
 yellow at 50% and red at 80%. `NO_COLOR` and non-TTY output disable color.
