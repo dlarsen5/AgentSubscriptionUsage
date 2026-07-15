@@ -30,7 +30,8 @@ OPTIONS:
     --codex        only Codex (limits + sessions)
     --cursor       only Cursor (included-usage limits)
     --openrouter   only OpenRouter (credits + pi/omp/opencode sessions)
-    --history [N]  daily usage graph for the trailing N days (default 14, max 90)
+    --history [N]  daily usage graph window in days (default 7, max 90)
+    --no-history   skip the daily usage graph
     --no-sessions  skip the local top-sessions / by-model scan
     -h, --help     show this help
 ";
@@ -47,7 +48,7 @@ fn main() {
 
     let mut json = false;
     let mut scan_sessions = true;
-    let mut history: Option<u32> = None;
+    let mut history: u32 = 7;
     let mut only: Option<&str> = None;
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -64,9 +65,10 @@ fn main() {
                     .get(i + 1)
                     .and_then(|n| n.parse::<u32>().ok())
                     .inspect(|_| i += 1)
-                    .unwrap_or(14);
-                history = Some(days.clamp(1, 90));
+                    .unwrap_or(7);
+                history = days.clamp(1, 90);
             }
+            "--no-history" => history = 0,
             "-h" | "--help" => {
                 print!("{HELP}");
                 return;
@@ -141,9 +143,11 @@ fn main() {
     }
     let model_totals = sessions::aggregate_models(&top_sessions);
 
-    let mut daily_history = history
-        .map(|days| sessions::collect_daily(&home, days))
-        .unwrap_or_default();
+    let mut daily_history = if history > 0 {
+        sessions::collect_daily(&home, history)
+    } else {
+        Vec::new()
+    };
     if let Some(o) = only {
         for day in &mut daily_history {
             day.by_provider.retain(|p, _| match o {

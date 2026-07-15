@@ -49,8 +49,8 @@ make install PREFIX=/usr/local   # or elsewhere (BINDIR = PREFIX/bin)
 ./usage --cursor       # only Cursor (included-usage limits)
 ./usage --openrouter   # only OpenRouter (credits + pi/omp/opencode sessions)
 ./usage --no-sessions  # skip the local transcript scan
-./usage --history      # daily usage graph, trailing 14 days
-./usage --history 30   # …or any window up to 90 days
+./usage --history 30   # widen the daily graph window (default 7, max 90)
+./usage --no-history   # skip the daily usage graph
 AGENT_USAGE_DATE=2026-07-08 ./usage   # session tables for a past day
 ```
 
@@ -96,8 +96,9 @@ Today by model
 The `cost` column only appears when at least one row has a recorded
 per-message cost (pi, omp, opencode).
 
-`--history [N]` adds a trailing daily-usage graph built from the same local
-transcripts, with one stacked bar per day colored by agent:
+A trailing daily-usage graph is shown by default (7 days; `--history N` for
+up to 90, `--no-history` to skip), built from the same local transcripts,
+with one stacked bar per day colored by agent:
 
 ```
 Daily usage — last 7 days (weighted tokens)

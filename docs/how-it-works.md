@@ -57,7 +57,8 @@ All scanners follow the same rules:
   day.
 - Sessions whose ranking weight is zero (e.g. free/local models reporting no
   tokens) are dropped.
-- `--history [N]` runs the same scanners over an N-day range in one pass
+- The daily graph (7 days by default; `--history N` up to 90, `--no-history`
+  to disable) runs the same scanners over an N-day range in one pass
   (files are selected by `mtime >= window start`; each usage record is
   bucketed into its own day by line timestamp) and renders per-day totals as
   stacked bars, one segment per agent, scaled to the window maximum and
