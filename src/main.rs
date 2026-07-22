@@ -1,6 +1,7 @@
 mod claude;
 mod codex;
 mod cursor;
+mod kimi;
 mod model;
 mod openrouter;
 mod render;
@@ -21,13 +22,15 @@ USAGE:
     usage [OPTIONS]
 
 Also reports OpenRouter credits/spend when a key is found (pi, opencode),
-and scans today's local session transcripts from Claude Code, Codex, pi,
-oh-my-pi (omp) and opencode to show top sessions and per-model totals.
+and scans today's local session transcripts from Claude Code, Codex, Kimi
+Code, pi, oh-my-pi (omp) and opencode to show top sessions and per-model
+totals.
 
 OPTIONS:
     --json         emit normalized JSON instead of the terminal view
     --claude       only Claude (limits + sessions)
     --codex        only Codex (limits + sessions)
+    --kimi         only Kimi (limits + sessions)
     --cursor       only Cursor (included-usage limits)
     --openrouter   only OpenRouter (credits + pi/omp/opencode sessions)
     --history [N]  daily usage graph window in days (default 7, max 90)
@@ -57,6 +60,7 @@ fn main() {
             "--json" => json = true,
             "--claude" => only = Some("claude"),
             "--codex" => only = Some("codex"),
+            "--kimi" => only = Some("kimi"),
             "--cursor" => only = Some("cursor"),
             "--openrouter" => only = Some("openrouter"),
             "--no-sessions" => scan_sessions = false,
@@ -102,6 +106,11 @@ fn main() {
             "codex",
             codex::fetch as Fetcher,
             detected(format!("{home}/.codex/auth.json")),
+        ),
+        (
+            "kimi",
+            kimi::fetch as Fetcher,
+            detected(format!("{home}/.kimi-code/credentials/kimi-code.json")),
         ),
         (
             "cursor",

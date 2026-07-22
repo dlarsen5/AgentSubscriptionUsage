@@ -9,6 +9,7 @@ pub fn print_provider(usage: &ProviderUsage, color: bool) {
     let title = match usage.provider {
         "claude" => "Claude",
         "codex" => "Codex",
+        "kimi" => "Kimi",
         "cursor" => "Cursor",
         "openrouter" => "OpenRouter",
         other => other,
@@ -226,9 +227,10 @@ pub fn print_sessions(sessions: &[SessionStat], models: &[ModelStat], color: boo
 const HISTORY_BAR_WIDTH: usize = 40;
 
 /// (provider, ANSI color, glyph for no-color output)
-const PROVIDER_STYLES: [(&str, &str, char); 5] = [
+const PROVIDER_STYLES: [(&str, &str, char); 6] = [
     ("claude", "33", '█'),
     ("codex", "36", '▓'),
+    ("kimi", "31", '▞'),
     ("pi", "34", '▒'),
     ("omp", "35", '░'),
     ("opencode", "32", '▪'),

@@ -116,6 +116,7 @@ fn scan_all(home: &str, range: DateRange) -> Vec<SessionStat> {
         range,
     ));
     sessions.extend(scan_opencode(home, range));
+    sessions.extend(scan_kimi(home, range));
     sessions
 }
 
@@ -568,6 +569,104 @@ fn scan_opencode(home: &str, range: DateRange) -> Vec<SessionStat> {
     out
 }
 
+/// Kimi Code keeps sessions under
+/// sessions/<workspace>/session_<id>/agents/<agent>/wire.jsonl; every agent
+/// (main + subagents) logs its own `usage.record` events with per-turn token
+/// deltas and epoch-ms timestamps. All agents aggregate into one session.
+fn scan_kimi(home: &str, range: DateRange) -> Vec<SessionStat> {
+    let root = PathBuf::from(format!("{home}/.kimi-code/sessions"));
+    let mut out = Vec::new();
+    for workspace in read_dir_paths(&root) {
+        for session_dir in read_dir_paths(&workspace) {
+            if !session_dir.is_dir() {
+                continue;
+            }
+            let mut acc = FileAcc::default();
+            for agent_dir in read_dir_paths(&session_dir.join("agents")) {
+                let wire = agent_dir.join("wire.jsonl");
+                if modified_in_range(&wire, range) {
+                    scan_kimi_wire(&wire, range, &mut acc);
+                }
+            }
+            if acc.requests == 0 {
+                continue;
+            }
+            let project = kimi_project(&session_dir, &workspace);
+            let session_id = session_dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .trim_start_matches("session_")
+                .to_string();
+            out.push(finish_session("kimi", project, session_id, acc));
+        }
+    }
+    out
+}
+
+fn scan_kimi_wire(path: &Path, range: DateRange, acc: &mut FileAcc) {
+    let Some(lines) = read_lines(path) else {
+        return;
+    };
+    for line in lines {
+        if line.get("type").and_then(Value::as_str) != Some("usage.record") {
+            continue;
+        }
+        // Only per-turn deltas; any other scope would double-count.
+        if line
+            .get("usageScope")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s != "turn")
+        {
+            continue;
+        }
+        let day = line
+            .get("time")
+            .and_then(Value::as_i64)
+            .and_then(DateTime::<chrono::Utc>::from_timestamp_millis)
+            .map(|dt| dt.with_timezone(&Local).date_naive())
+            .unwrap_or(range.end);
+        if !range.contains(day) {
+            continue;
+        }
+        let model = line
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let usage = &line["usage"];
+        let get = |k: &str| usage.get(k).and_then(Value::as_u64).unwrap_or(0);
+        acc.record(
+            day,
+            model,
+            Tokens {
+                input: get("inputOther"),
+                output: get("output"),
+                cache_read: get("inputCacheRead"),
+                cache_write: get("inputCacheCreation"),
+                cost_usd: 0.0,
+            },
+        );
+    }
+}
+
+/// Project name from the session's state.json workDir, falling back to the
+/// workspace dir name ("wd_<name>_<hash>").
+fn kimi_project(session_dir: &Path, workspace: &Path) -> String {
+    if let Ok(raw) = std::fs::read_to_string(session_dir.join("state.json"))
+        && let Ok(state) = serde_json::from_str::<Value>(&raw)
+        && let Some(wd) = state.get("workDir").and_then(Value::as_str)
+    {
+        return last_path_component(wd);
+    }
+    let name = workspace.file_name().unwrap_or_default().to_string_lossy();
+    let trimmed = name.strip_prefix("wd_").unwrap_or(&name);
+    trimmed
+        .rsplit_once('_')
+        .map(|(base, _hash)| base)
+        .unwrap_or(trimmed)
+        .to_string()
+}
+
 fn finish_session(
     provider: &'static str,
     project: String,
@@ -755,6 +854,60 @@ mod tests {
         assert!((stat.tokens.cost_usd - 0.25).abs() < 1e-9);
         assert_eq!(stat.project, "projw");
         assert_eq!(stat.session_id, "ses_1");
+    }
+
+    #[test]
+    fn kimi_sums_turn_usage_records_across_agents() {
+        // scan_kimi filters by real file mtime, so this test uses the
+        // actual current date rather than a fixed one.
+        let home = fixture_dir("kimi-home");
+        let session = home.join(".kimi-code/sessions/wd_projk_0123456789ab/session_aabbccdd-1");
+        fs::create_dir_all(session.join("agents/main")).unwrap();
+        fs::create_dir_all(session.join("agents/sub")).unwrap();
+        fs::write(
+            session.join("state.json"),
+            r#"{"workDir":"/home/u/projk","agents":{}}"#,
+        )
+        .unwrap();
+        let now_ms = Utc::now().timestamp_millis();
+        fs::write(
+            session.join("agents/main/wire.jsonl"),
+            [
+                r#"{"type":"metadata","protocol_version":"1.4"}"#.to_string(),
+                format!(
+                    r#"{{"type":"usage.record","model":"kimi-code/kimi-for-coding","usage":{{"inputOther":100,"output":10,"inputCacheRead":1000,"inputCacheCreation":5}},"usageScope":"turn","time":{now_ms}}}"#
+                ),
+                // non-turn scope — skipped to avoid double counting
+                format!(
+                    r#"{{"type":"usage.record","model":"kimi-code/kimi-for-coding","usage":{{"inputOther":9999,"output":9999,"inputCacheRead":0,"inputCacheCreation":0}},"usageScope":"session","time":{now_ms}}}"#
+                ),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        fs::write(
+            session.join("agents/sub/wire.jsonl"),
+            format!(
+                r#"{{"type":"usage.record","model":"kimi-code/kimi-for-coding","usage":{{"inputOther":50,"output":5,"inputCacheRead":500,"inputCacheCreation":0}},"usageScope":"turn","time":{now_ms}}}"#
+            ),
+        )
+        .unwrap();
+
+        let stats = scan_kimi(
+            home.to_str().unwrap(),
+            DateRange::single(Local::now().date_naive()),
+        );
+        assert_eq!(stats.len(), 1);
+        let stat = &stats[0];
+        assert_eq!(stat.provider, "kimi");
+        assert_eq!(stat.requests, 2);
+        assert_eq!(stat.tokens.input, 150);
+        assert_eq!(stat.tokens.output, 15);
+        assert_eq!(stat.tokens.cache_read, 1500);
+        assert_eq!(stat.tokens.cache_write, 5);
+        assert_eq!(stat.project, "projk");
+        assert_eq!(stat.session_id, "aabbccdd-1");
+        assert_eq!(stat.model, "kimi-code/kimi-for-coding");
     }
 
     #[test]

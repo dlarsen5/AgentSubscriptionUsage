@@ -10,19 +10,24 @@ session transcripts for **today's per-session / per-model usage**:
 |---|---|
 | Claude (session/weekly limits) | `~/.claude/.credentials.json` → `api.anthropic.com/api/oauth/usage` |
 | Codex (session/weekly limits) | `~/.codex/auth.json` → `chatgpt.com/backend-api/codex/usage` |
+| Kimi (5h/weekly limits) | `~/.kimi-code/credentials/kimi-code.json` → `api.kimi.com/coding/v1/usages` |
 | Cursor (included-usage limits) | `~/.config/cursor/auth.json` → `api2.cursor.sh` DashboardService |
 | OpenRouter (credits & spend) | key from pi/opencode → `openrouter.ai/api/v1/{credits,key}` |
-| Top sessions / by-model tables | local transcripts of Claude Code, Codex, pi, oh-my-pi (omp), opencode |
+| Top sessions / by-model tables | local transcripts of Claude Code, Codex, Kimi Code, pi, oh-my-pi (omp), opencode |
 
 Providers whose credentials aren't present are skipped silently. Nothing is
-stored or sent anywhere else; the tool is read-only and each credential is
-only ever sent to the provider that issued it. See
+stored or sent anywhere else; each credential is only ever sent to the
+provider that issued it. The tool is read-only with one exception: Kimi
+access tokens expire after ~15 minutes, so when the stored one is stale the
+tool runs the same OAuth refresh the `kimi` CLI would and rewrites
+`~/.kimi-code/credentials/kimi-code.json` in place (refresh tokens rotate,
+so the new pair must be persisted or the CLI's copy would stop working). See
 [docs/how-it-works.md](docs/how-it-works.md) for the full data-source and
 metric documentation.
 
-> **Disclaimer**: this project is not affiliated with Anthropic, OpenAI, or
-> OpenRouter. The Claude and Codex usage endpoints are undocumented internal
-> APIs used by the agents' own status screens — they may change or disappear
+> **Disclaimer**: this project is not affiliated with Anthropic, OpenAI,
+> Moonshot AI, or OpenRouter. The provider usage endpoints are undocumented
+> internal APIs used by the agents' own status screens — they may change or disappear
 > without notice, and your use of them is subject to each provider's terms of
 > service. Transcript formats are similarly unstable; parsers degrade to
 > zeros rather than erroring when fields go missing.
@@ -46,6 +51,7 @@ make install PREFIX=/usr/local   # or elsewhere (BINDIR = PREFIX/bin)
 ./usage --json         # normalized JSON for scripts / monitoring
 ./usage --claude       # only Claude (limits + sessions)
 ./usage --codex        # only Codex (limits + sessions)
+./usage --kimi         # only Kimi (limits + sessions)
 ./usage --cursor       # only Cursor (included-usage limits)
 ./usage --openrouter   # only OpenRouter (credits + pi/omp/opencode sessions)
 ./usage --no-sessions  # skip the local transcript scan
@@ -67,6 +73,10 @@ Codex (prolite)
   Weekly (all models)           ███████████░░░░░░░░░  53%  resets Fri 17 Jul 23:09 (in 5d 13h)
   5h (GPT-5.3-Codex-Spark)      ░░░░░░░░░░░░░░░░░░░░   0%  resets 14:48 (in 4h 59m)
   Weekly (GPT-5.3-Codex-Spark)  ░░░░░░░░░░░░░░░░░░░░   0%  resets Sun 19 Jul 09:48 (in 6d 23h)
+
+Kimi (advanced)
+  5h limit      ░░░░░░░░░░░░░░░░░░░░   1%  1 of 100  resets 12:29 (in 2h 37m)
+  Weekly limit  █░░░░░░░░░░░░░░░░░░░   4%  4 of 100  resets Mon 27 Jul 15:29 (in 5d 5h)
 
 Cursor (Pro)
   Included usage (month)  ██░░░░░░░░░░░░░░░░░░  10%  $2.00 of $20.00  resets Sat 18 Jul 09:42 (in 4d 21h)

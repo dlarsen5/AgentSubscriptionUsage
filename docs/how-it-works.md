@@ -7,8 +7,9 @@
 2. **Sessions** — a scan of today's local session transcripts from every
    supported agent, aggregated into "Top sessions today" and "Today by model".
 
-Nothing is written anywhere; credentials never leave the machine except to the
-provider that issued them.
+Credentials never leave the machine except to the provider that issued them.
+Nothing is written anywhere, with one exception: the Kimi credentials file is
+rewritten when its short-lived access token has to be refreshed (see below).
 
 ## 1. Limits (network)
 
@@ -16,6 +17,7 @@ provider that issued them.
 |---|---|---|
 | Claude Code | `~/.claude/.credentials.json` → `claudeAiOauth.accessToken` | `GET https://api.anthropic.com/api/oauth/usage` with `anthropic-beta: oauth-2025-04-20` |
 | Codex | `~/.codex/auth.json` → `tokens.access_token`, `tokens.account_id` | `GET https://chatgpt.com/backend-api/codex/usage` with `chatgpt-account-id` header |
+| Kimi | `~/.kimi-code/credentials/kimi-code.json` → `access_token` (+ `refresh_token`) | `GET https://api.kimi.com/coding/v1/usages`; refresh via `POST https://auth.kimi.com/api/oauth/token` |
 | Cursor | `~/.config/cursor/auth.json` → `accessToken` (JWT written by `cursor-agent login`) | `POST https://api2.cursor.sh/aiserver.v1.DashboardService/{GetCurrentPeriodUsage,GetPlanInfo}` (ConnectRPC over JSON, `connect-protocol-version: 1`) |
 | OpenRouter | first key found in `~/.pi/agent/auth.json` or `~/.local/share/opencode/auth.json` (`openrouter.key`) | `GET https://openrouter.ai/api/v1/credits` and `/api/v1/key` |
 
@@ -31,6 +33,17 @@ runs on its own thread while the main thread does the session scan.
   (weekly) as `used_percent` + `reset_at`, plus `additional_rate_limits` for
   model-scoped meters (e.g. GPT-5.3-Codex-Spark). Window labels are derived
   from `limit_window_seconds` (18000 → "5h", 604800 → "Weekly").
+- **Kimi** returns a request-count weekly allowance (top-level `usage`:
+  used/limit/`resetTime`) plus short-window meters in `limits[]` labeled by
+  their window duration (300 minutes → "5h limit"). Counters arrive as JSON
+  strings; the plan is `user.membership.level` ("LEVEL_ADVANCED" →
+  "advanced"). Kimi access tokens expire after ~15 minutes, so a stored token
+  is usually stale: the tool then performs the same public-client refresh
+  grant the `kimi` CLI uses (`grant_type=refresh_token`, the CLI's baked-in
+  client id) and atomically rewrites the credentials file (temp file → fsync
+  → rename, mode 0600). The refresh token rotates on every refresh, so
+  persisting the new pair is required — without it the CLI's stored refresh
+  token would be invalidated and `kimi` would demand a re-login.
 - **Cursor** meters a monthly included-usage allowance in cents
   (`planUsage.limit` / `remaining`, e.g. $20/mo on Pro) rather than token
   windows; we show `totalPercentUsed` with the dollar figures and the billing
@@ -42,7 +55,8 @@ runs on its own thread while the main thread does the session scan.
 
 Expired tokens are detected before the call (Claude stores `expiresAt`) or
 mapped from a 401, and reported as "open `claude`/`codex` once to refresh" —
-this tool never refreshes or mutates tokens itself.
+this tool never refreshes or mutates tokens itself, except for Kimi where
+the 15-minute token lifetime makes refresh unavoidable (see above).
 
 ## 2. Sessions (local files, no network)
 
@@ -73,6 +87,7 @@ Per-agent specifics:
 |---|---|---|---|
 | Claude Code | `~/.claude/projects/<proj>/<session>.jsonl` | one JSON line per event; assistant lines carry `message.usage` | Streaming rewrites the same message across lines → deduplicated by `message.id`, so one API response counts once. `<synthetic>` (error) messages skipped. Project name from the transcript's `cwd`. |
 | Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `event_msg`/`token_count` events | We sum per-request deltas (`last_token_usage`) instead of the cumulative `total_token_usage`, which would double-count resumed sessions. Model from `turn_context` (the meta line's model is often null). `input` includes cached tokens, so cache reads are split out via `cached_input_tokens`. |
+| Kimi Code | `~/.kimi-code/sessions/<workspace>/session_<id>/agents/<agent>/wire.jsonl` | `usage.record` events | Per-turn deltas (`usageScope: "turn"`; other scopes are skipped to avoid double counting) with `inputOther`/`output`/`inputCacheRead`/`inputCacheCreation` and epoch-ms `time`. Every agent (main + subagents) logs its own wire file; all aggregate into one session. Project from the session's `state.json` `workDir`. |
 | pi | `~/.pi/agent/sessions/<proj>/<ts>_<id>.jsonl` | `session` header + `message` lines | Assistant messages carry `usage {input, output, cacheRead, cacheWrite, cost.total}`. Written once per response — no dedup needed. |
 | oh-my-pi (omp) | `~/.omp/agent/sessions/…` | same as pi | Same parser. omp also snapshots Codex rate limits into `agent.db`'s `usage_history` table, but those cover the same ChatGPT account the Codex provider already reports live. |
 | opencode | `~/.local/share/opencode/storage/message/<sessionID>/msg_*.json` | one JSON file per message | Assistant files carry `tokens {input, output, reasoning, cache{read,write}}` and `cost` (USD). `reasoning` is billed as output, so it's added to `output`. Project from `path.cwd`. Session dirs untouched today are skipped via dir mtime. |
